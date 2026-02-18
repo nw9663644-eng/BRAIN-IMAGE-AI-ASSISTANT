@@ -41,7 +41,7 @@ if not GEMINI_API_KEY:
     print("   Set it via: export GEMINI_API_KEY=your_key_here")
 
 # Direct REST endpoint — no SDK needed
-GEMINI_API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
+GEMINI_API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
 
 
 async def call_gemini(messages: list[dict], json_mode: bool = False) -> str:

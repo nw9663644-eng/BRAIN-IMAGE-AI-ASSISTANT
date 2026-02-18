@@ -81,7 +81,7 @@ async function callGeminiDirect(
     return '⚠️ AI 功能暂不可用：未配置 VITE_GEMINI_API_KEY 环境变量。请在 Vercel 设置中添加此变量后重新部署。';
   }
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
 
   // Build Gemini API request body
   const contents: any[] = [];
@@ -184,7 +184,7 @@ export const validateBrainImage = async (
     return { isValid: true, imageType: 'unknown', reason: 'API key not configured, skipping validation' };
   }
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
   const base64Data = imageBase64.includes(',') ? imageBase64.split(',')[1] : imageBase64;
 
   const requestBody = {
@@ -253,7 +253,7 @@ export const analyzeImageWithGeminiVision = async (
     throw new Error('VITE_GEMINI_API_KEY 未配置');
   }
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
 
   // Remove data URL prefix if present (e.g., "data:image/png;base64,")
   const base64Data = imageBase64.includes(',') ? imageBase64.split(',')[1] : imageBase64;
