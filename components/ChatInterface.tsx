@@ -63,6 +63,23 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ role }) => {
     setInput('');
     setIsLoading(true);
 
+    // Safety timeout — auto-cancel after 30 seconds to prevent stuck loading
+    const safetyTimeout = setTimeout(() => {
+      setIsLoading(false);
+      setMessages(prev => {
+        const last = prev[prev.length - 1];
+        if (last?.role === 'user') {
+          return [...prev, {
+            id: (Date.now() + 1).toString(),
+            role: 'model' as const,
+            text: '⏱️ 请求超时。请检查网络连接或刷新页面后重试。',
+            timestamp: new Date()
+          }];
+        }
+        return prev;
+      });
+    }, 30000);
+
     try {
       const roleInstruction = role === UserRole.DOCTOR
         ? " [当前用户是一名临床医生。请使用专业医学术语，提供详细的机制解释。]"
@@ -90,11 +107,12 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ role }) => {
       const errorMsg: ChatMessage = {
         id: (Date.now() + 1).toString(),
         role: 'model',
-        text: `抱歉，连接 Gemini AI 服务时出现问题：${error.message}。\n请检查网络连接和 API Key 配置。`,
+        text: `抱歉，连接 AI 服务时出现问题：${error.message}。\n请刷新页面后重试。`,
         timestamp: new Date()
       };
       setMessages(prev => [...prev, errorMsg]);
     } finally {
+      clearTimeout(safetyTimeout);
       setIsLoading(false);
     }
   };
@@ -234,8 +252,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ role }) => {
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSend()}
               placeholder={role === UserRole.DOCTOR ? "输入医学问题、病例或研究课题..." : "问我任何关于健康的问题..."}
-              className="flex-1 bg-transparent border-none focus:ring-0 text-[15px] text-slate-700 placeholder:text-slate-400 h-10"
-              disabled={isLoading}
+              className="flex-1 bg-transparent border-none focus:ring-0 focus:outline-none text-[15px] text-slate-700 placeholder:text-slate-400 h-10"
             />
             <button
               onClick={() => handleSend()}
