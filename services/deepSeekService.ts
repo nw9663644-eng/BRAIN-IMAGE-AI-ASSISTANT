@@ -1,19 +1,48 @@
 import { SYSTEM_INSTRUCTION } from '../constants';
 
-// Backend URL — the backend handles Gemini API calls server-side
-const BACKEND_URL = 'http://localhost:8000';
-
 export interface DeepSeekMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
 }
 
 /**
- * Call AI via the backend /chat endpoint.
- * The backend handles Gemini API calls server-side, avoiding CORS and API key issues.
+ * Get the Gemini API key from environment variables.
  */
-export const callDeepSeekAPI = async (messages: DeepSeekMessage[], jsonMode: boolean = false): Promise<string> => {
+function getApiKey(): string {
+  const key = (import.meta as any).env?.VITE_GEMINI_API_KEY || '';
+  if (!key) {
+    console.warn('VITE_GEMINI_API_KEY not set — AI features will not work');
+  }
+  return key;
+}
+
+/**
+ * Detect if we're running on a deployed environment (not localhost).
+ */
+const isDeployed = typeof window !== 'undefined'
+  && !window.location.hostname.includes('localhost')
+  && !window.location.hostname.includes('127.0.0.1');
+
+const BACKEND_URL = 'http://localhost:8000';
+
+/**
+ * Call AI — tries backend first (local dev), falls back to direct Gemini API.
+ * On deployed environments (Vercel), skips backend entirely.
+ */
+export const callDeepSeekAPI = async (
+  messages: DeepSeekMessage[],
+  jsonMode: boolean = false
+): Promise<string> => {
+  // On Vercel or other deployed environments, call Gemini directly
+  if (isDeployed) {
+    return callGeminiDirect(messages, jsonMode);
+  }
+
+  // On localhost, try backend first, then fall back to direct Gemini
   try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
+
     const response = await fetch(`${BACKEND_URL}/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -21,7 +50,10 @@ export const callDeepSeekAPI = async (messages: DeepSeekMessage[], jsonMode: boo
         messages: messages.map(m => ({ role: m.role, content: m.content })),
         json_mode: jsonMode,
       }),
+      signal: controller.signal,
     });
+
+    clearTimeout(timeoutId);
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({ detail: response.statusText }));
@@ -31,49 +63,83 @@ export const callDeepSeekAPI = async (messages: DeepSeekMessage[], jsonMode: boo
     const data = await response.json();
     return data.response;
   } catch (error: any) {
-    // If backend is unreachable, try local fallback
-    if (error.message === 'Failed to fetch' || error.message?.includes('NetworkError')) {
-      console.warn('Backend unreachable, using local fallback');
-      return generateFallbackResponse(messages);
-    }
-    throw error;
+    console.warn('Backend unavailable, calling Gemini directly:', error.message);
+    return callGeminiDirect(messages, jsonMode);
   }
 };
 
 /**
- * Fallback when backend is unavailable.
+ * Call Gemini REST API directly from the browser.
+ * No backend needed — works on Vercel.
  */
-function generateFallbackResponse(messages: DeepSeekMessage[]): string {
-  const lastMsg = messages[messages.length - 1]?.content || '';
-
-  const knowledgeBase: Record<string, string> = {
-    '阿尔茨海默': `阿尔茨海默病（Alzheimer's Disease, AD）是最常见的神经退行性疾病，占痴呆病例的 60-80%。
-
-**核心病理特征：**
-1. **淀粉样蛋白假说**：β-淀粉样蛋白（Aβ42）异常聚集，形成老年斑
-2. **Tau蛋白病理**：过度磷酸化Tau蛋白形成神经原纤维缠结
-3. **神经炎症**：小胶质细胞异常激活，TREM2、CD33基因表达上调
-
-**影像学表现：** MRI海马体萎缩、内嗅皮层变薄；PET显示颞顶叶低代谢
-
-⚠️ 以上为AI辅助参考信息，不构成临床诊断依据。`,
-
-    '帕金森': `帕金森病（Parkinson's Disease, PD）是第二常见的神经退行性疾病。
-
-**核心病理：** 黑质致密带多巴胺能神经元进行性丢失，α-突触核蛋白异常聚集形成路易体。
-
-**四主征：** 静止性震颤、肌强直、运动迟缓、姿势不稳
-
-⚠️ 以上为AI辅助参考信息，不构成临床诊断依据。`,
-  };
-
-  for (const [keyword, response] of Object.entries(knowledgeBase)) {
-    if (lastMsg.includes(keyword)) return response;
+async function callGeminiDirect(
+  messages: DeepSeekMessage[],
+  jsonMode: boolean = false
+): Promise<string> {
+  const apiKey = getApiKey();
+  if (!apiKey) {
+    return '⚠️ AI 功能暂不可用：未配置 VITE_GEMINI_API_KEY 环境变量。请在 Vercel 设置中添加此变量后重新部署。';
   }
 
-  return `感谢您的提问。AI 服务暂时不可用，请确保后端服务正在运行（uvicorn main:app --reload --port 8000）。
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
 
-⚠️ 以上为AI辅助参考信息，不构成临床诊断依据。`;
+  // Build Gemini API request body
+  const contents: any[] = [];
+  let systemInstruction: string | undefined;
+
+  for (const msg of messages) {
+    if (msg.role === 'system') {
+      systemInstruction = msg.content;
+    } else {
+      contents.push({
+        role: msg.role === 'assistant' ? 'model' : 'user',
+        parts: [{ text: msg.content }],
+      });
+    }
+  }
+
+  // Ensure the first content is from 'user' (Gemini requirement)
+  if (contents.length === 0 || contents[0].role !== 'user') {
+    contents.unshift({
+      role: 'user',
+      parts: [{ text: '你好' }],
+    });
+  }
+
+  const requestBody: any = { contents };
+
+  if (systemInstruction) {
+    requestBody.systemInstruction = {
+      parts: [{ text: systemInstruction }],
+    };
+  }
+
+  if (jsonMode) {
+    requestBody.generationConfig = {
+      responseMimeType: 'application/json',
+    };
+  }
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(requestBody),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    const errorMsg = errorData?.error?.message || `HTTP ${response.status}`;
+    throw new Error(`Gemini API 错误: ${errorMsg}`);
+  }
+
+  const data = await response.json();
+
+  try {
+    return data.candidates[0].content.parts[0].text;
+  } catch (e) {
+    console.error('Unexpected Gemini response:', data);
+    throw new Error('Gemini 返回了意外的响应格式');
+  }
 }
 
 /**
