@@ -252,6 +252,10 @@ const AIAnalysisView: React.FC<AIAnalysisViewProps> = ({ onBack, userRole = User
    };
 
    // ... (runAnalysis and mockData logic remains the same) ...
+   const isDeployed = typeof window !== 'undefined'
+      && !window.location.hostname.includes('localhost')
+      && !window.location.hostname.includes('127.0.0.1');
+
    const runAnalysis = async (engine: 'python' | 'deepseek') => {
       if (!selectedImageFile) {
          alert("请至少上传脑影像文件");
@@ -262,18 +266,25 @@ const AIAnalysisView: React.FC<AIAnalysisViewProps> = ({ onBack, userRole = User
       setStep('analyzing');
 
       try {
-         if (engine === 'deepseek') {
-            const formData = new FormData();
-            formData.append('image_file', selectedImageFile);
-            if (selectedGeneFile) {
-               formData.append('gene_file', selectedGeneFile);
-            }
-
+         if (engine === 'deepseek' && !isDeployed) {
+            // Only try backend on localhost
             try {
+               const controller = new AbortController();
+               const timeoutId = setTimeout(() => controller.abort(), 5000);
+
+               const formData = new FormData();
+               formData.append('image_file', selectedImageFile);
+               if (selectedGeneFile) {
+                  formData.append('gene_file', selectedGeneFile);
+               }
+
                const response = await fetch('http://localhost:8000/analyze_multimodal', {
                   method: 'POST',
                   body: formData,
+                  signal: controller.signal,
                });
+
+               clearTimeout(timeoutId);
 
                if (!response.ok) {
                   throw new Error(`Server responded with ${response.status}`);
@@ -285,13 +296,13 @@ const AIAnalysisView: React.FC<AIAnalysisViewProps> = ({ onBack, userRole = User
                return;
 
             } catch (serverError) {
-               console.error("Backend Connection Error:", serverError);
-               alert("连接 Gemini AI 后端失败。\n\n请确保您已在终端运行 'uvicorn backend.main:app --reload' 启动 Python 后端服务。\n\n系统将自动切换到演示数据模式。");
+               console.warn("Backend unavailable, using demo data:", serverError);
                fallbackToMockData(false);
             }
 
          } else {
-            fallbackToMockData(true);
+            // On Vercel or python engine: use mock data directly
+            fallbackToMockData(engine === 'python');
          }
 
       } catch (error: any) {
