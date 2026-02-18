@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { UserRole, UserProfile, MedicalCase, CaseMessage, AnalysisResult } from './types';
 import { Brain, Activity, UserCircle, LogOut, FileText, X, MessageSquare, ClipboardList, ImageIcon, Clock, CheckCircle2, AlertCircle, Send, ChevronRight, Calendar, Bell, Scan, Tag, Dna, Network, Users, ArrowRight, Sparkles, Stethoscope, Award, MapPin } from 'lucide-react';
+import { Analytics } from '@vercel/analytics/react';
 import HeritabilityChart from './components/HeritabilityChart';
 import BrainConnectivityMap from './components/BrainConnectivityMap';
 import ChatInterface from './components/ChatInterface';
@@ -1108,6 +1109,7 @@ const App: React.FC = () => {
           </div>
         )}
       </div>
+      <Analytics />
     </div>
   );
 };
