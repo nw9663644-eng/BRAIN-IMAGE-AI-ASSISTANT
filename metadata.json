@@ -1,0 +1,5 @@
+{
+  "name": "NeuroGen Connect",
+  "description": "基于2025年Nature Communications研究的医疗AI仪表板，连接精神疾病的基因组结果与人类大脑细胞类型和区域。",
+  "requestFramePermissions": []
+}
