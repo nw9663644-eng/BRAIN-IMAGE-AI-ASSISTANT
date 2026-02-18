@@ -171,6 +171,75 @@ export const analyzeMedicalImageWithDeepSeek = async (
 };
 
 /**
+ * 使用 Gemini Vision 验证上传的图片是否为医学脑部影像。
+ * 返回 { isValid: boolean, imageType: string, reason: string }
+ */
+export const validateBrainImage = async (
+  imageBase64: string,
+  mimeType: string
+): Promise<{ isValid: boolean; imageType: string; reason: string }> => {
+  const apiKey = getApiKey();
+  if (!apiKey) {
+    // If no API key, skip validation and let analysis proceed
+    return { isValid: true, imageType: 'unknown', reason: 'API key not configured, skipping validation' };
+  }
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+  const base64Data = imageBase64.includes(',') ? imageBase64.split(',')[1] : imageBase64;
+
+  const requestBody = {
+    contents: [{
+      role: 'user',
+      parts: [
+        {
+          inlineData: {
+            mimeType: mimeType || 'image/jpeg',
+            data: base64Data,
+          },
+        },
+        {
+          text: `请判断这张图片是否为医学脑部影像（如 MRI、fMRI、CT、PET、SPECT 等脑部扫描图像）。
+请严格返回以下 JSON 格式：
+{
+  "isValid": true或false,
+  "imageType": "图像类型，如MRI/CT/fMRI/非医学图像",
+  "reason": "判断理由，一句话说明"
+}
+注意：只有脑部医学影像才算有效。普通照片、非脑部X光、其他器官影像等都算无效。`,
+        },
+      ],
+    }],
+    generationConfig: {
+      responseMimeType: 'application/json',
+    },
+  };
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody),
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      return { isValid: true, imageType: 'unknown', reason: 'Validation API error, proceeding anyway' };
+    }
+
+    const data = await response.json();
+    const text = data.candidates[0].content.parts[0].text;
+    return JSON.parse(text);
+  } catch (err) {
+    clearTimeout(timeoutId);
+    return { isValid: true, imageType: 'unknown', reason: 'Validation timed out, proceeding anyway' };
+  }
+};
+
+/**
  * 使用 Gemini Vision API 直接分析上传的脑影像图片。
  * 将 base64 图片发送给 Gemini，返回结构化 JSON 报告。
  */

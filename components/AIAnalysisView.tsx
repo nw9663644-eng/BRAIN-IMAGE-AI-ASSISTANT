@@ -229,6 +229,8 @@ const AIAnalysisView: React.FC<AIAnalysisViewProps> = ({ onBack, userRole = User
 
    const [report, setReport] = useState<ExtendedAnalysisReport | null>(null);
    const [analysisEngine, setAnalysisEngine] = useState<'python' | 'deepseek'>('deepseek');
+   const [analysisStatus, setAnalysisStatus] = useState<string>('');
+   const [analysisError, setAnalysisError] = useState<string>('');
 
    // Lifecycle Simulation States
    const [enableLifestyle, setEnableLifestyle] = useState(false);
@@ -259,17 +261,21 @@ const AIAnalysisView: React.FC<AIAnalysisViewProps> = ({ onBack, userRole = User
       }
 
       setAnalysisEngine(engine);
+      setAnalysisError('');
+      setAnalysisStatus('正在读取影像文件...');
       setStep('analyzing');
 
-      // For 'python' engine, just use mock data
+      // For 'python' engine, just use mock data (demo mode)
       if (engine === 'python') {
+         setAnalysisStatus('正在加载演示数据...');
          fallbackToMockData(true);
          return;
       }
 
       // 'deepseek' engine → call Gemini Vision API with actual image
       try {
-         // Read image as base64
+         // Step 1: Read image as base64
+         setAnalysisStatus('📷 正在读取影像文件...');
          const imageBase64 = await new Promise<string>((resolve, reject) => {
             const reader = new FileReader();
             reader.onloadend = () => resolve(reader.result as string);
@@ -277,9 +283,24 @@ const AIAnalysisView: React.FC<AIAnalysisViewProps> = ({ onBack, userRole = User
             reader.readAsDataURL(selectedImageFile!);
          });
 
-         // Read gene file text if present
+         // Step 2: Validate image is a brain scan
+         setAnalysisStatus('🔍 AI 正在验证图像类型...');
+         const { validateBrainImage } = await import('../services/deepSeekService');
+         const validation = await validateBrainImage(
+            imageBase64,
+            selectedImageFile!.type || 'image/jpeg'
+         );
+
+         if (!validation.isValid) {
+            setAnalysisError(`❌ 图像验证未通过\n\n类型识别：${validation.imageType}\n原因：${validation.reason}\n\n请上传有效的脑部医学影像（MRI、fMRI、CT 等）`);
+            setStep('analyzing'); // stay on analyzing page to show error
+            return;
+         }
+
+         // Step 3: Read gene file if present
          let geneText: string | undefined;
          if (selectedGeneFile) {
+            setAnalysisStatus('🧬 正在解析基因数据...');
             geneText = await new Promise<string>((resolve, reject) => {
                const reader = new FileReader();
                reader.onloadend = () => resolve(reader.result as string);
@@ -288,21 +309,20 @@ const AIAnalysisView: React.FC<AIAnalysisViewProps> = ({ onBack, userRole = User
             });
          }
 
-         // Import the Gemini Vision function
+         // Step 4: Call Gemini Vision for full analysis
+         setAnalysisStatus(`🧠 Gemini AI 正在分析 ${validation.imageType || '脑部'} 影像...`);
          const { analyzeImageWithGeminiVision } = await import('../services/deepSeekService');
-
-         // Call Gemini with the actual image
          const aiResult = await analyzeImageWithGeminiVision(
             imageBase64,
             selectedImageFile!.type || 'image/jpeg',
             geneText
          );
 
-         // Merge AI result with mock data defaults (in case AI omits some fields)
+         // Step 5: Build final report
+         setAnalysisStatus('📊 正在生成诊断报告...');
          const finalReport: ExtendedAnalysisReport = {
             ...mockReportData,
             ...aiResult,
-            // Ensure arrays exist
             regions: aiResult.regions?.length ? aiResult.regions : mockReportData.regions,
             diseaseRisks: aiResult.diseaseRisks?.length ? aiResult.diseaseRisks : mockReportData.diseaseRisks,
             gwasAnalysis: aiResult.gwasAnalysis?.length ? aiResult.gwasAnalysis : mockReportData.gwasAnalysis,
@@ -324,16 +344,14 @@ const AIAnalysisView: React.FC<AIAnalysisViewProps> = ({ onBack, userRole = User
                geneFileName: selectedGeneFile?.name || null,
                report: finalReport,
             });
-            // Keep last 20 records
             localStorage.setItem(historyKey, JSON.stringify(existing.slice(0, 20)));
-            console.log('✅ 分析结果已保存到本地存储');
          } catch (storageErr) {
             console.warn('localStorage save failed:', storageErr);
          }
 
       } catch (error: any) {
-         console.warn("Gemini Vision 分析失败，使用演示数据:", error.message);
-         fallbackToMockData(false);
+         console.error('Gemini Vision analysis failed:', error);
+         setAnalysisError(`❌ AI 分析失败\n\n错误：${error.message}\n\n可能原因：\n• VITE_GEMINI_API_KEY 未配置或无效\n• 网络连接问题\n• 图片文件过大（建议小于 4MB）`);
       }
    };
 
@@ -555,11 +573,30 @@ const AIAnalysisView: React.FC<AIAnalysisViewProps> = ({ onBack, userRole = User
                )}
                {step === 'analyzing' && (
                   <div className="flex flex-col items-center justify-center py-16 animate-fade-in w-full max-w-2xl">
-                     <div className="relative mb-8"><Loader2 size={80} className="text-indigo-200 animate-spin" /><div className="absolute inset-0 flex items-center justify-center"><Network size={32} className="text-indigo-600 animate-pulse" /></div></div>
-                     <h3 className="text-2xl font-bold text-slate-800 mb-2">正在进行跨模态特征对齐...</h3>
-                     <p className="text-slate-500 text-center mb-6">正在将 fMRI 影像体素 (Voxel) 与 scRNA-seq 基因表达矩阵进行空间映射</p>
-                     <div className="w-full bg-slate-100 rounded-full h-3 mb-2 overflow-hidden relative"><div className="absolute top-0 left-0 h-full bg-gradient-to-r from-blue-500 to-emerald-500 animate-[scan_2s_ease-in-out_infinite] w-1/3 rounded-full"></div></div>
-                     <div className="flex justify-between w-full text-xs font-mono text-slate-400"><span>Image Feature Extraction</span><span>Gene Set Enrichment</span><span>Gemini AI Inference</span></div>
+                     {analysisError ? (
+                        /* Error State */
+                        <div className="w-full bg-white border border-red-200 rounded-2xl p-8 shadow-lg">
+                           <div className="flex items-center gap-3 mb-4">
+                              <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center"><AlertTriangle size={24} className="text-red-500" /></div>
+                              <h3 className="text-xl font-bold text-slate-800">分析失败</h3>
+                           </div>
+                           <pre className="text-sm text-slate-600 whitespace-pre-wrap bg-red-50 p-4 rounded-xl border border-red-100 mb-6">{analysisError}</pre>
+                           <div className="flex gap-3">
+                              <button onClick={() => { setStep('upload'); setAnalysisError(''); }} className="px-6 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-medium transition-colors">← 返回重新上传</button>
+                              <button onClick={() => { setAnalysisError(''); runAnalysis('deepseek'); }} className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold transition-colors flex items-center gap-2"><RefreshCw size={16} /> 重试分析</button>
+                           </div>
+                        </div>
+                     ) : (
+                        /* Loading State */
+                        <>
+                           <div className="relative mb-8"><Loader2 size={80} className="text-indigo-200 animate-spin" /><div className="absolute inset-0 flex items-center justify-center"><Network size={32} className="text-indigo-600 animate-pulse" /></div></div>
+                           <h3 className="text-2xl font-bold text-slate-800 mb-2">Gemini AI 正在分析影像...</h3>
+                           <p className="text-indigo-600 text-center mb-6 font-medium text-lg animate-pulse">{analysisStatus || '初始化中...'}</p>
+                           <div className="w-full bg-slate-100 rounded-full h-3 mb-4 overflow-hidden relative"><div className="absolute top-0 left-0 h-full bg-gradient-to-r from-blue-500 to-emerald-500 animate-[scan_2s_ease-in-out_infinite] w-1/3 rounded-full"></div></div>
+                           <div className="flex justify-between w-full text-xs font-mono text-slate-400"><span>图像验证</span><span>特征提取</span><span>Gemini AI 推理</span></div>
+                           <p className="text-xs text-slate-400 mt-6">⏱ 首次分析可能需要 15-30 秒，请耐心等待</p>
+                        </>
+                     )}
                   </div>
                )}
                {step === 'initial_report' && report && (
