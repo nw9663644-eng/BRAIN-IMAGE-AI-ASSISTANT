@@ -140,6 +140,38 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ role }) => {
     { icon: <Activity size={14} />, text: "感冒和流感的区别" },
   ];
 
+  /**
+   * Convert markdown text to clean HTML for display.
+   * Handles: **bold**, *italic*, ## headings, numbered lists, line breaks.
+   */
+  const renderMarkdown = (text: string): string => {
+    let html = text
+      // Escape HTML entities
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      // Headers: ## Title → styled div
+      .replace(/^###\s+(.+)$/gm, '<div style="font-weight:700;font-size:14px;margin:12px 0 4px;color:#4338ca">$1</div>')
+      .replace(/^##\s+(.+)$/gm, '<div style="font-weight:700;font-size:15px;margin:14px 0 6px;color:#3730a3">$1</div>')
+      .replace(/^#\s+(.+)$/gm, '<div style="font-weight:700;font-size:16px;margin:16px 0 8px;color:#312e81">$1</div>')
+      // Bold: **text** → <strong>
+      .replace(/\*\*(.+?)\*\*/g, '<strong style="font-weight:600;color:#1e293b">$1</strong>')
+      // Italic: *text* → <em>
+      .replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, '<em>$1</em>')
+      // Bullet points: - item → styled list item
+      .replace(/^[\-•]\s+(.+)$/gm, '<div style="padding-left:16px;margin:2px 0">• $1</div>')
+      // Numbered list: 1. item → styled
+      .replace(/^(\d+)\.\s+(.+)$/gm, '<div style="padding-left:16px;margin:2px 0"><span style="font-weight:600;color:#4f46e5">$1.</span> $2</div>')
+      // Double newlines → paragraph break
+      .replace(/\n\n/g, '<div style="height:12px"></div>')
+      // Single newlines → line break
+      .replace(/\n/g, '<br/>')
+      // Warning emoji lines
+      .replace(/(⚠️.*?)(<br\/>|$)/g, '<div style="margin-top:8px;padding:6px 10px;background:#fef3c7;border-radius:8px;font-size:12px;color:#92400e">$1</div>');
+
+    return html;
+  };
+
   return (
     <div className="flex flex-col h-[750px] bg-white/50 rounded-[32px] shadow-2xl border border-white/60 overflow-hidden font-sans relative backdrop-blur-xl">
       {/* Dynamic Background */}
@@ -192,7 +224,14 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ role }) => {
                   ? 'bg-gradient-to-br from-indigo-600 to-blue-600 text-white rounded-2xl rounded-br-sm'
                   : 'bg-white/80 backdrop-blur-sm text-slate-700 border border-white/60 rounded-2xl rounded-bl-sm'
                   }`}>
-                  <div className="whitespace-pre-wrap">{msg.text}</div>
+                  {isUser ? (
+                    <div className="whitespace-pre-wrap">{msg.text}</div>
+                  ) : (
+                    <div
+                      className="leading-relaxed"
+                      dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.text) }}
+                    />
+                  )}
                   <div className={`text-[10px] mt-2 font-medium opacity-60 ${isUser ? 'text-indigo-100 text-right' : 'text-slate-400'}`}>
                     {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                   </div>
@@ -243,7 +282,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ role }) => {
       {/* Input Area */}
       <div className="p-5 relative z-20">
         <div className="relative group">
-          <div className="absolute inset-0 bg-gradient-to-r from-indigo-500 to-purple-500 rounded-2xl opacity-0 group-focus-within:opacity-10 transition-opacity blur-md"></div>
+          <div className="absolute inset-0 bg-gradient-to-r from-indigo-500 to-purple-500 rounded-2xl opacity-0 group-focus-within:opacity-10 transition-opacity blur-md pointer-events-none"></div>
           <div className="flex items-center gap-3 bg-white border border-slate-200/80 rounded-2xl px-4 py-2.5 shadow-lg shadow-slate-200/50 transition-all group-focus-within:border-indigo-300 group-focus-within:shadow-indigo-100 group-focus-within:ring-4 group-focus-within:ring-indigo-50/50">
             <MessageSquare size={20} className="text-slate-400 group-focus-within:text-indigo-500 transition-colors" />
             <input
