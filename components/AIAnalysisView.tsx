@@ -251,10 +251,6 @@ const AIAnalysisView: React.FC<AIAnalysisViewProps> = ({ onBack, userRole = User
       setSelectedGeneFile(file);
    };
 
-   // ... (runAnalysis and mockData logic remains the same) ...
-   const isDeployed = typeof window !== 'undefined'
-      && !window.location.hostname.includes('localhost')
-      && !window.location.hostname.includes('127.0.0.1');
 
    const runAnalysis = async (engine: 'python' | 'deepseek') => {
       if (!selectedImageFile) {
@@ -265,48 +261,78 @@ const AIAnalysisView: React.FC<AIAnalysisViewProps> = ({ onBack, userRole = User
       setAnalysisEngine(engine);
       setStep('analyzing');
 
+      // For 'python' engine, just use mock data
+      if (engine === 'python') {
+         fallbackToMockData(true);
+         return;
+      }
+
+      // 'deepseek' engine → call Gemini Vision API with actual image
       try {
-         if (engine === 'deepseek' && !isDeployed) {
-            // Only try backend on localhost
-            try {
-               const controller = new AbortController();
-               const timeoutId = setTimeout(() => controller.abort(), 5000);
+         // Read image as base64
+         const imageBase64 = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result as string);
+            reader.onerror = reject;
+            reader.readAsDataURL(selectedImageFile!);
+         });
 
-               const formData = new FormData();
-               formData.append('image_file', selectedImageFile);
-               if (selectedGeneFile) {
-                  formData.append('gene_file', selectedGeneFile);
-               }
+         // Read gene file text if present
+         let geneText: string | undefined;
+         if (selectedGeneFile) {
+            geneText = await new Promise<string>((resolve, reject) => {
+               const reader = new FileReader();
+               reader.onloadend = () => resolve(reader.result as string);
+               reader.onerror = reject;
+               reader.readAsText(selectedGeneFile!);
+            });
+         }
 
-               const response = await fetch('http://localhost:8000/analyze_multimodal', {
-                  method: 'POST',
-                  body: formData,
-                  signal: controller.signal,
-               });
+         // Import the Gemini Vision function
+         const { analyzeImageWithGeminiVision } = await import('../services/deepSeekService');
 
-               clearTimeout(timeoutId);
+         // Call Gemini with the actual image
+         const aiResult = await analyzeImageWithGeminiVision(
+            imageBase64,
+            selectedImageFile!.type || 'image/jpeg',
+            geneText
+         );
 
-               if (!response.ok) {
-                  throw new Error(`Server responded with ${response.status}`);
-               }
+         // Merge AI result with mock data defaults (in case AI omits some fields)
+         const finalReport: ExtendedAnalysisReport = {
+            ...mockReportData,
+            ...aiResult,
+            // Ensure arrays exist
+            regions: aiResult.regions?.length ? aiResult.regions : mockReportData.regions,
+            diseaseRisks: aiResult.diseaseRisks?.length ? aiResult.diseaseRisks : mockReportData.diseaseRisks,
+            gwasAnalysis: aiResult.gwasAnalysis?.length ? aiResult.gwasAnalysis : mockReportData.gwasAnalysis,
+            modelConfidence: aiResult.modelConfidence?.length ? aiResult.modelConfidence : mockReportData.modelConfidence,
+            lifecycleProjection: aiResult.lifecycleProjection?.length ? aiResult.lifecycleProjection : mockReportData.lifecycleProjection,
+         };
 
-               const data = await response.json();
-               setReport({ ...mockReportData, ...data });
-               setStep('initial_report');
-               return;
+         setReport(finalReport);
+         setStep('initial_report');
 
-            } catch (serverError) {
-               console.warn("Backend unavailable, using demo data:", serverError);
-               fallbackToMockData(false);
-            }
-
-         } else {
-            // On Vercel or python engine: use mock data directly
-            fallbackToMockData(engine === 'python');
+         // Save to localStorage for history
+         try {
+            const historyKey = 'neurogen_analysis_history';
+            const existing = JSON.parse(localStorage.getItem(historyKey) || '[]');
+            existing.unshift({
+               id: Date.now().toString(),
+               timestamp: new Date().toISOString(),
+               fileName: selectedImageFile!.name,
+               geneFileName: selectedGeneFile?.name || null,
+               report: finalReport,
+            });
+            // Keep last 20 records
+            localStorage.setItem(historyKey, JSON.stringify(existing.slice(0, 20)));
+            console.log('✅ 分析结果已保存到本地存储');
+         } catch (storageErr) {
+            console.warn('localStorage save failed:', storageErr);
          }
 
       } catch (error: any) {
-         console.warn("Analysis Error:", error.message);
+         console.warn("Gemini Vision 分析失败，使用演示数据:", error.message);
          fallbackToMockData(false);
       }
    };
