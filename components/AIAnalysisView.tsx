@@ -524,7 +524,7 @@ const AIAnalysisView: React.FC<AIAnalysisViewProps> = ({ onBack, userRole = User
       // ... (Keep existing Light Mode Logic mostly same, condensed for brevity here) ...
       // Using exact same code structure as before for these steps to ensure "no other changes"
       return (
-         <div className="min-h-screen bg-slate-50 flex flex-col font-sans text-slate-800">
+         <div className="h-screen bg-slate-50 flex flex-col font-sans text-slate-800 overflow-hidden">
             <header className="bg-slate-700 text-white px-8 py-3 flex justify-between items-center shadow-md">
                <div className="flex items-center gap-2"><h1 className="text-lg font-bold flex items-center gap-2">医疗影像AI诊断系统</h1></div>
                <div className="flex gap-4 text-sm font-medium">
@@ -603,15 +603,9 @@ const AIAnalysisView: React.FC<AIAnalysisViewProps> = ({ onBack, userRole = User
                            <h4 className="font-bold text-slate-800 mb-2 flex items-center gap-2"><Info size={18} className="text-blue-600" /> 综合诊断总结</h4>
                            <p className="text-slate-800 leading-relaxed text-justify font-medium">{report.summary}</p>
                         </div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                           <div className="bg-slate-50 p-6 rounded-xl border border-slate-100">
-                              <h4 className="font-bold text-slate-700 mb-3 flex items-center gap-2"><ScanEye size={16} /> 影像学发现 (fMRI)</h4>
-                              <div className="text-slate-600 text-sm leading-7 text-justify">{renderTextWithTooltips(report.detailedFindings.split('单细胞')[0] || report.detailedFindings)}</div>
-                           </div>
-                           <div className="bg-slate-50 p-6 rounded-xl border border-slate-100">
-                              <h4 className="font-bold text-slate-700 mb-3 flex items-center gap-2"><Dna size={16} /> 单细胞/基因发现 (scRNA)</h4>
-                              <div className="text-slate-600 text-sm leading-7 text-justify">{report.detailedFindings.includes('单细胞') ? renderTextWithTooltips('单细胞' + report.detailedFindings.split('单细胞')[1]) : "未检测到显著的单细胞数据异常描述，或主要基于影像特征推断。"}</div>
-                           </div>
+                        <div className="bg-slate-50 p-6 rounded-xl border border-slate-100">
+                           <h4 className="font-bold text-slate-700 mb-3 flex items-center gap-2"><ScanEye size={16} /> 详细影像与基因分析发现</h4>
+                           <div className="text-slate-600 text-sm leading-7 text-justify whitespace-pre-line">{renderTextWithTooltips(report.detailedFindings)}</div>
                         </div>
                         <div>
                            <h4 className="font-bold text-slate-800 mb-3 flex items-center gap-2"><Stethoscope size={18} /> 临床建议</h4>
