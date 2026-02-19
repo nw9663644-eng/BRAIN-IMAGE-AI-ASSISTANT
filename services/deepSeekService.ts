@@ -12,7 +12,7 @@ export interface DeepSeekMessage {
 
 const TTK_API_BASE = 'https://api.ttk.homes/v1';
 const TTK_MODEL_CHAT = 'gemini-3-flash-preview-cli';   // Fast flash model for chat
-const TTK_MODEL_VISION = 'gemini-3-flash-preview-cli'; // Fast flash model for vision too
+const TTK_MODEL_VISION = 'gemini-2.5-pro-cli';          // Pro model for image analysis (stable)
 
 function getApiKey(): string {
   const key = (import.meta as any).env?.VITE_TTK_API_KEY || '';
