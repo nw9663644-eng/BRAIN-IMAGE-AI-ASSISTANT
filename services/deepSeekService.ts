@@ -11,8 +11,8 @@ export interface DeepSeekMessage {
 // ============================================================
 
 const TTK_API_BASE = 'https://api.ttk.homes/v1';
-const TTK_MODEL_CHAT = 'gemini-2.5-pro-cli';
-const TTK_MODEL_VISION = 'gemini-2.5-pro-cli';
+const TTK_MODEL_CHAT = 'gemini-3-flash-preview-cli';   // Fast flash model for chat
+const TTK_MODEL_VISION = 'gemini-2.5-pro-cli';          // Pro model for image analysis
 
 function getApiKey(): string {
   const key = (import.meta as any).env?.VITE_TTK_API_KEY || '';
@@ -71,7 +71,7 @@ async function callTTKDirect(
 
   const url = `${TTK_API_BASE}/chat/completions`;
 
-  // Convert system message to the first user message prefix if needed
+  // Convert messages to OpenAI format
   const openaiMessages: { role: string; content: string }[] = messages.map(m => ({
     role: m.role === 'assistant' ? 'assistant' : m.role,
     content: m.content,
@@ -80,35 +80,51 @@ async function callTTKDirect(
   const requestBody: any = {
     model: TTK_MODEL_CHAT,
     messages: openaiMessages,
-    max_tokens: 4096,
+    max_tokens: 2048,
   };
 
   if (jsonMode) {
     requestBody.response_format = { type: 'json_object' };
   }
 
-  const response = await fetchWithRetry(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify(requestBody),
-  });
-
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    const errorMsg = errorData?.error?.message || `HTTP ${response.status}`;
-    throw new Error(`AI API 错误: ${errorMsg}`);
-  }
-
-  const data = await response.json();
+  // 30-second timeout for chat responses
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 30000);
 
   try {
-    return data.choices[0].message.content;
-  } catch (e) {
-    console.error('Unexpected API response:', data);
-    throw new Error('AI 返回了意外的响应格式');
+    const response = await fetchWithRetry(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify(requestBody),
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      const errorMsg = errorData?.error?.message || `HTTP ${response.status}`;
+      throw new Error(`AI API 错误: ${errorMsg}`);
+    }
+
+    const data = await response.json();
+    clearTimeout(timeoutId);
+
+    try {
+      return data.choices[0].message.content;
+    } catch (e) {
+      console.error('Unexpected API response:', data);
+      throw new Error('AI 返回了意外的响应格式');
+    }
+  } catch (err: any) {
+    clearTimeout(timeoutId);
+    if (err.name === 'AbortError') {
+      throw new Error('⏱ 请求超时（30秒），请重试');
+    }
+    throw err;
   }
 }
 
