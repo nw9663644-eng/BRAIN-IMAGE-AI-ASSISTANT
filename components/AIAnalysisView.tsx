@@ -533,7 +533,7 @@ const AIAnalysisView: React.FC<AIAnalysisViewProps> = ({ onBack, userRole = User
                   <button onClick={onBack} className="bg-red-500 hover:bg-red-600 px-3 py-1 rounded text-xs transition-colors">退出</button>
                </div>
             </header>
-            <div className="flex-1 flex flex-col items-center p-8">
+            <div className="flex-1 flex flex-col items-center p-8 overflow-y-auto w-full">
                <h2 className="text-2xl font-bold mb-8 flex items-center gap-2 border-b-2 border-slate-800 pb-1">AI 多模态深度分析 (Multimodal)</h2>
                {step === 'upload' && (
                   <div className="w-full max-w-5xl animate-fade-in-up">
