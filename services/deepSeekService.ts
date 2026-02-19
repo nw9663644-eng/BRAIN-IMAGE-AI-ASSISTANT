@@ -5,25 +5,22 @@ export interface DeepSeekMessage {
   content: string;
 }
 
-/**
- * Get the Gemini API key from environment variables.
- */
+// ============================================================
+// ttk.homes OpenAI-Compatible API Configuration
+// Supports: gemini-2.5-pro-cli, gemini-3-flash-preview-cli, etc.
+// ============================================================
+
+const TTK_API_BASE = 'https://api.ttk.homes/v1';
+const TTK_MODEL_CHAT = 'gemini-2.5-pro-cli';
+const TTK_MODEL_VISION = 'gemini-2.5-pro-cli';
+
 function getApiKey(): string {
-  const key = (import.meta as any).env?.VITE_GEMINI_API_KEY || '';
+  const key = (import.meta as any).env?.VITE_TTK_API_KEY || '';
   if (!key) {
-    console.warn('VITE_GEMINI_API_KEY not set — AI features will not work');
+    console.warn('VITE_TTK_API_KEY not set — AI features will not work');
   }
   return key;
 }
-
-/**
- * Detect if we're running on a deployed environment (not localhost).
- */
-const isDeployed = typeof window !== 'undefined'
-  && !window.location.hostname.includes('localhost')
-  && !window.location.hostname.includes('127.0.0.1');
-
-const BACKEND_URL = 'http://localhost:8000';
 
 /**
  * Fetch with automatic retry on 429 (rate limit) errors.
@@ -32,16 +29,13 @@ const BACKEND_URL = 'http://localhost:8000';
 async function fetchWithRetry(
   url: string,
   options: RequestInit,
-  maxRetries: number = 3
+  maxRetries: number = 2
 ): Promise<Response> {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     const response = await fetch(url, options);
 
     if (response.status === 429 && attempt < maxRetries) {
-      // Parse retry-after or use exponential backoff
-      const errorData = await response.json().catch(() => ({}));
-      const retryMatch = errorData?.error?.message?.match(/retry in ([\d.]+)s/i);
-      const waitSeconds = retryMatch ? Math.ceil(parseFloat(retryMatch[1])) + 2 : (10 * Math.pow(2, attempt));
+      const waitSeconds = 10 * Math.pow(2, attempt);
       console.warn(`Rate limited (429). Retry ${attempt + 1}/${maxRetries} in ${waitSeconds}s...`);
       await new Promise(resolve => setTimeout(resolve, waitSeconds * 1000));
       continue;
@@ -49,124 +43,72 @@ async function fetchWithRetry(
 
     return response;
   }
-  // Should not reach here, but just in case
   return fetch(url, options);
 }
 
 /**
- * Call AI — tries backend first (local dev), falls back to direct Gemini API.
- * On deployed environments (Vercel), skips backend entirely.
+ * Call OpenAI-compatible chat completions API at ttk.homes.
+ * Works for both local dev and deployed environments.
  */
 export const callDeepSeekAPI = async (
   messages: DeepSeekMessage[],
   jsonMode: boolean = false
 ): Promise<string> => {
-  // On Vercel or other deployed environments, call Gemini directly
-  if (isDeployed) {
-    return callGeminiDirect(messages, jsonMode);
-  }
-
-  // On localhost, try backend first, then fall back to direct Gemini
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000);
-
-    const response = await fetch(`${BACKEND_URL}/chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        messages: messages.map(m => ({ role: m.role, content: m.content })),
-        json_mode: jsonMode,
-      }),
-      signal: controller.signal,
-    });
-
-    clearTimeout(timeoutId);
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({ detail: response.statusText }));
-      throw new Error(errorData.detail || `服务器错误: ${response.status}`);
-    }
-
-    const data = await response.json();
-    return data.response;
-  } catch (error: any) {
-    console.warn('Backend unavailable, calling Gemini directly:', error.message);
-    return callGeminiDirect(messages, jsonMode);
-  }
+  return callTTKDirect(messages, jsonMode);
 };
 
 /**
- * Call Gemini REST API directly from the browser.
- * No backend needed — works on Vercel.
+ * Call the ttk.homes OpenAI-compatible API directly from the browser.
  */
-async function callGeminiDirect(
+async function callTTKDirect(
   messages: DeepSeekMessage[],
   jsonMode: boolean = false
 ): Promise<string> {
   const apiKey = getApiKey();
   if (!apiKey) {
-    return '⚠️ AI 功能暂不可用：未配置 VITE_GEMINI_API_KEY 环境变量。请在 Vercel 设置中添加此变量后重新部署。';
+    return '⚠️ AI 功能暂不可用：未配置 VITE_TTK_API_KEY 环境变量。';
   }
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+  const url = `${TTK_API_BASE}/chat/completions`;
 
-  // Build Gemini API request body
-  const contents: any[] = [];
-  let systemInstruction: string | undefined;
+  // Convert system message to the first user message prefix if needed
+  const openaiMessages: { role: string; content: string }[] = messages.map(m => ({
+    role: m.role === 'assistant' ? 'assistant' : m.role,
+    content: m.content,
+  }));
 
-  for (const msg of messages) {
-    if (msg.role === 'system') {
-      systemInstruction = msg.content;
-    } else {
-      contents.push({
-        role: msg.role === 'assistant' ? 'model' : 'user',
-        parts: [{ text: msg.content }],
-      });
-    }
-  }
-
-  // Ensure the first content is from 'user' (Gemini requirement)
-  if (contents.length === 0 || contents[0].role !== 'user') {
-    contents.unshift({
-      role: 'user',
-      parts: [{ text: '你好' }],
-    });
-  }
-
-  const requestBody: any = { contents };
-
-  if (systemInstruction) {
-    requestBody.systemInstruction = {
-      parts: [{ text: systemInstruction }],
-    };
-  }
+  const requestBody: any = {
+    model: TTK_MODEL_CHAT,
+    messages: openaiMessages,
+    max_tokens: 4096,
+  };
 
   if (jsonMode) {
-    requestBody.generationConfig = {
-      responseMimeType: 'application/json',
-    };
+    requestBody.response_format = { type: 'json_object' };
   }
 
   const response = await fetchWithRetry(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+    },
     body: JSON.stringify(requestBody),
   });
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
     const errorMsg = errorData?.error?.message || `HTTP ${response.status}`;
-    throw new Error(`Gemini API 错误: ${errorMsg}`);
+    throw new Error(`AI API 错误: ${errorMsg}`);
   }
 
   const data = await response.json();
 
   try {
-    return data.candidates[0].content.parts[0].text;
+    return data.choices[0].message.content;
   } catch (e) {
-    console.error('Unexpected Gemini response:', data);
-    throw new Error('Gemini 返回了意外的响应格式');
+    console.error('Unexpected API response:', data);
+    throw new Error('AI 返回了意外的响应格式');
   }
 }
 
@@ -199,9 +141,8 @@ export const analyzeMedicalImageWithDeepSeek = async (
 };
 
 /**
- * 使用 Gemini Vision API 直接分析上传的图片。
+ * 使用视觉模型分析上传的图片。
  * 无论图片是否为标准脑影像，都会生成一份丰富的分析报告。
- * 将 base64 图片发送给 Gemini，返回结构化 JSON 报告。
  */
 export const analyzeImageWithGeminiVision = async (
   imageBase64: string,
@@ -210,12 +151,12 @@ export const analyzeImageWithGeminiVision = async (
 ): Promise<any> => {
   const apiKey = getApiKey();
   if (!apiKey) {
-    throw new Error('VITE_GEMINI_API_KEY 未配置');
+    throw new Error('VITE_TTK_API_KEY 未配置');
   }
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+  const url = `${TTK_API_BASE}/chat/completions`;
 
-  // Remove data URL prefix if present (e.g., "data:image/png;base64,")
+  // Remove data URL prefix if present
   const base64Data = imageBase64.includes(',') ? imageBase64.split(',')[1] : imageBase64;
 
   const systemPrompt = `你是 NeuroGen Core —— 一个专业的神经影像 AI 分析系统。
@@ -223,11 +164,11 @@ export const analyzeImageWithGeminiVision = async (
 
 重要规则：
 1. 如果图像是标准脑部影像（MRI、fMRI、CT、PET等），请根据实际影像内容进行专业分析。
-2. 如果图像不是标准脑部影像（如普通照片、截图、其他医学图像），请基于神经科学知识生成一份合理的演示分析报告，作为系统功能展示。不要拒绝分析，不要说"无法分析"。
+2. 如果图像不是标准脑部影像，请基于神经科学知识生成一份合理的演示分析报告，作为系统功能展示。不要拒绝分析，不要说"无法分析"。
 3. 如果提供了基因/细胞数据，请将其纳入分析。如果数据格式不标准，请基于神经科学知识生成合理的关联分析。
 4. 无论输入是什么，你都必须返回完整的 JSON 报告。
 
-你必须严格返回以下 JSON 格式（不要包含任何其他文本、markdown 或解释）：
+你必须严格返回以下 JSON 格式（不要包含任何其他文本或 markdown）：
 {
   "summary": "200字左右的综合诊断总结，包含主要发现和初步诊断倾向。如果不是标准脑影像，在开头标注[演示模式]",
   "detailedFindings": "详细描述，分为【影像学发现 (fMRI)】和【单细胞/基因发现 (scRNA)】两段，用换行分隔。每段至少100字，内容丰富专业",
@@ -270,27 +211,17 @@ export const analyzeImageWithGeminiVision = async (
     {"year": 2033, "riskLevel": 83},
     {"year": 2034, "riskLevel": 87}
   ]
-}
+}`;
 
-注意事项：
-- regions 数组必须包含 5 个脑区
-- diseaseRisks 必须包含 5 种疾病风险评估
-- gwasAnalysis 必须包含 5 种细胞类型
-- probability 和 score 必须是数字，不是字符串
-- color 使用 hex 颜色：红色系 #ef4444 (高风险)，橙色 #f97316，黄色 #f59e0b，绿色 #10b981/#34d399 (低风险)
-- level 只能是 "High Risk"、"Moderate" 或 "Low"
-- lifecycleProjection 必须有 10 年数据（2025-2034），riskLevel 范围 0-100
-- detailedFindings 第一段用【影像学发现 (fMRI)】开头，第二段用【单细胞/基因发现 (scRNA)】开头
-- 请生成丰富、专业、有深度的内容`;
-
-  const userParts: any[] = [
+  const userContent: any[] = [
     {
-      inlineData: {
-        mimeType: mimeType || 'image/jpeg',
-        data: base64Data,
+      type: 'image_url',
+      image_url: {
+        url: `data:${mimeType || 'image/jpeg'};base64,${base64Data}`,
       },
     },
     {
+      type: 'text',
       text: geneFileText
         ? `请分析这张影像并结合以下基因/细胞数据，生成完整的神经科学多模态诊断报告：\n${geneFileText.substring(0, 3000)}`
         : '请分析这张影像并生成完整的神经科学多模态诊断报告。',
@@ -298,28 +229,26 @@ export const analyzeImageWithGeminiVision = async (
   ];
 
   const requestBody = {
-    contents: [
-      {
-        role: 'user',
-        parts: userParts,
-      },
+    model: TTK_MODEL_VISION,
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userContent },
     ],
-    systemInstruction: {
-      parts: [{ text: systemPrompt }],
-    },
-    generationConfig: {
-      responseMimeType: 'application/json',
-    },
+    max_tokens: 4096,
+    response_format: { type: 'json_object' },
   };
 
-  // 60-second timeout for image analysis (it's heavier)
+  // 90-second timeout for image analysis
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 60000);
+  const timeoutId = setTimeout(() => controller.abort(), 90000);
 
   try {
     const response = await fetchWithRetry(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      },
       body: JSON.stringify(requestBody),
       signal: controller.signal,
     });
@@ -329,14 +258,16 @@ export const analyzeImageWithGeminiVision = async (
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
       const errorMsg = errorData?.error?.message || `HTTP ${response.status}`;
-      throw new Error(`Gemini API 错误: ${errorMsg}`);
+      throw new Error(`AI API 错误: ${errorMsg}`);
     }
 
     const data = await response.json();
-    const text = data.candidates[0].content.parts[0].text;
+    const text = data.choices[0].message.content;
 
-    // Parse the JSON response
-    return JSON.parse(text);
+    // Parse the JSON response (handle both raw JSON and markdown-wrapped JSON)
+    const jsonMatch = text.match(/```json\n?([\s\S]*?)\n?```/) || text.match(/(\{[\s\S]*\})/);
+    const jsonText = jsonMatch ? jsonMatch[1] : text;
+    return JSON.parse(jsonText.trim());
   } catch (err: any) {
     clearTimeout(timeoutId);
     if (err.name === 'AbortError') {
